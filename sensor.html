@@ -4,88 +4,92 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Sensor aktiv</title>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js" type="text/javascript"></script>
     <style>
-        /* Komplett schwarzer Bildschirm - Das Handy soll unsichtbar arbeiten */
         body {
             background: #000000;
-            color: #111111; /* Fast unsichtbarer Text */
+            color: #222222;
             display: flex;
             justify-content: center;
             align-items: center;
             height: 100vh;
             margin: 0;
             font-family: sans-serif;
+            text-align: center;
         }
         .info {
-            text-align: center;
-            color: #222; /* Minimal sichtbar für dich beim Setup */
-            font-size: 1.2rem;
+            padding: 2rem;
         }
     </style>
 </head>
 <body>
 
     <div class="info">
-        <p>Sensor-Tool aktiv.</p>
-        <p>Steuerung erfolgt über den Monitor.</p>
+        <p style="color: #444; font-size: 1.2rem;">Sensor-Tool im Hintergrund aktiv.</p>
+        <p style="color: #222; font-size: 0.9rem;">(iOS: Falls keine Verbindung kommt, 1x tippen)</p>
     </div>
 
     <script>
-        // Session ID aus der URL auslesen
         const urlParams = new URLSearchParams(window.location.search);
         const roomId = urlParams.get('room');
 
-        const supabaseUrl = 'https://xyz.supabase.co';
-        const supabaseKey = 'public-anon-key';
-        const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
-        const channel = supabaseClient.channel(roomId);
+        const client = new Paho.MQTT.Client("broker.hivemq.com", Number(8000), "phone_" + roomId);
+        let sensorsActive = false;
 
-        let streamActive = false;
+        client.onConnectionLost = (responseObject) => { if (responseObject.errorCode !== 0) console.log("Verbindung verloren"); };
+        
+        client.onMessageArrived = (message) => {
+            const data = JSON.parse(message.payloadString);
+            if (data.type === 'trigger-vibrate') {
+                if (navigator.vibrate) navigator.vibrate(200);
+            }
+        };
 
-        channel
-            .on('broadcast', { event: 'trigger-calibration' }, () => {
-                // PC hat signalisiert: Kalibriere jetzt!
-                captureTableBaseline();
-            })
-            .subscribe((status) => {
-                if (status === 'SUBSCRIBED') {
-                    // Dem PC sagen, dass das Handy einsatzbereit ist
-                    channel.send({ type: 'broadcast', event: 'phone-connected', payload: {} });
-                    initSensorAccess();
-                }
-            });
+        client.connect({
+            onSuccess: () => {
+                client.subscribe("wasserwaage/" + roomId);
+                
+                // Melde dem PC, dass wir da sind
+                sendToPC({ type: 'phone-connected' });
+                
+                // Gyroskop aktivieren
+                initSensors();
+            },
+            useSSL: true
+        });
 
-        async function initSensorAccess() {
+        function sendToPC(obj) {
+            try {
+                const message = new Paho.MQTT.Message(JSON.stringify(obj));
+                message.destinationName = "wasserwaage/" + roomId;
+                client.send(message);
+            } catch(e) { console.log(e); }
+        }
+
+        function initSensors() {
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                // iOS verlangt leider beim allerersten Mal ein kurzes Tippen auf den schwarzen Bildschirm
+                // iOS verlangt eine Interaktion
                 document.body.addEventListener('click', async () => {
-                    await DeviceOrientationEvent.requestPermission();
-                    startGyroStreaming();
+                    const permission = await DeviceOrientationEvent.requestPermission();
+                    if (permission === 'granted') startStreaming();
                 }, { once: true });
             } else {
-                // Android startet sofort
-                startGyroStreaming();
+                // Android startet direkt
+                startStreaming();
             }
         }
 
-        function startGyroStreaming() {
+        function startStreaming() {
+            if (sensorsActive) return;
+            sensorsActive = true;
+            
             window.addEventListener('deviceorientation', (event) => {
-                // Sende die rohen Live-Daten permanent an den PC
-                channel.send({
-                    type: 'broadcast',
-                    event: 'gyro-data',
-                    payload: {
-                        beta: event.beta || 0,
-                        gamma: event.gamma || 0
-                    }
+                sendToPC({
+                    type: 'gyro-data',
+                    beta: event.beta || 0,
+                    gamma: event.gamma || 0
                 });
             });
-        }
-
-        function captureTableBaseline() {
-            // Einmaliges Vibrationssignal ans Loch in der Hand senden: "PC hat kalibriert!"
-            if (navigator.vibrate) navigator.vibrate(200);
         }
     </script>
 </body>
