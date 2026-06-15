@@ -3,157 +3,89 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sensor Modus</title>
-    <link rel="stylesheet" href="style.css">
+    <title>Sensor aktiv</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
-        /* Optimierung für den "No-Touch"-Modus: Große, kontrastreiche Statusbox */
-        .live-display {
-            padding: 3rem 2rem;
-            margin-top: 2rem;
+        /* Komplett schwarzer Bildschirm - Das Handy soll unsichtbar arbeiten */
+        body {
+            background: #000000;
+            color: #111111; /* Fast unsichtbarer Text */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            font-family: sans-serif;
         }
-        .countdown-val {
-            font-size: 4rem;
-            font-weight: 800;
-            color: var(--accent);
-            margin: 2rem 0;
+        .info {
+            text-align: center;
+            color: #222; /* Minimal sichtbar für dich beim Setup */
+            font-size: 1.2rem;
         }
     </style>
 </head>
 <body>
 
-    <div class="sensor-container">
-        <div class="step-card">
-            
-            <div id="step-1" class="step active">
-                <h2>Schritt 1: Tisch-Referenz</h2>
-                <p style="margin-top: 1rem; color: var(--text-muted);">
-                    Lege das Handy jetzt <strong>flach mit dem Display nach unten</strong> auf den Tisch.
-                </p>
-                <div id="countdown" class="countdown-val">5</div>
-                <p style="color: var(--accent); font-weight: 600;">Kalibrierung läuft automatisch...</p>
-            </div>
-
-            <div id="step-2" class="step">
-                <h2>Schritt 2: Monitor-Messung</h2>
-                <p style="margin-top: 1rem; color: var(--text-muted); min-height: 80px;">
-                    ⚡ <strong>Tisch gespeichert!</strong> ⚡<br>
-                    Nimm das Handy jetzt hoch und halte es flach an deinen Monitor.
-                </p>
-                <div class="countdown-val" style="color: var(--success);">✓</div>
-            </div>
-
-            <div id="step-3" class="step">
-                <h2>Schritt 3: Live-Abgleich</h2>
-                
-                <div id="live-box" class="live-display status-error">
-                    <div id="status-msg" class="status-text">⚠️ Nicht parallel</div>
-                    <div class="deviation-val"><span id="degree-val">0.0</span>°</div>
-                </div>
-                <p style="margin-top: 1.5rem; color: var(--text-muted); font-size: 0.85rem;">
-                    Zum Neustarten der Kalibrierung einfach die Seite neu laden.
-                </p>
-            </div>
-
-        </div>
+    <div class="info">
+        <p>Sensor-Tool aktiv.</p>
+        <p>Steuerung erfolgt über den Monitor.</p>
     </div>
 
     <script>
-        let tableBeta = 0;
-        let tableGamma = 0;
-        let isLive = false;
+        // Session ID aus der URL auslesen
+        const urlParams = new URLSearchParams(window.location.search);
+        const roomId = urlParams.get('room');
 
-        const step1 = document.getElementById('step-1');
-        const step2 = document.getElementById('step-2');
-        const step3 = document.getElementById('step-3');
-        const countdownEl = document.getElementById('countdown');
+        const supabaseUrl = 'https://xyz.supabase.co';
+        const supabaseKey = 'public-anon-key';
+        const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
+        const channel = supabaseClient.channel(roomId);
 
-        // Sobald die Seite auf dem Handy lädt, starten wir den Ablauf
-        window.addEventListener('load', () => {
-            // Falls iOS nach Rechten fragen muss, aktivieren wir den Sensor beim ersten Touch auf den Screen,
-            // falls der User die Seite öffnet. Für Android läuft es sofort komplett berührungslos.
-            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                // iOS Schutz: Einmaliges Tippen beim Öffnen der Seite aktivieren, falls nötig
-                document.body.addEventListener('click', startAutomatedFlow, { once: true });
-                countdownEl.textContent = "Tippe 1x, dann hinlegen";
-            } else {
-                // Android startet sofort ohne Berührung
-                startAutomatedFlow();
-            }
-        });
+        let streamActive = false;
 
-        function startAutomatedFlow() {
-            let timeLeft = 5;
-            countdownEl.textContent = timeLeft;
-
-            // 5 Sekunden Countdown läuft herunter, während das Handy auf dem Display liegt
-            const timer = setInterval(() => {
-                timeLeft--;
-                countdownEl.textContent = timeLeft;
-
-                if (timeLeft <= 0) {
-                    clearInterval(timer);
-                    captureTableAndProceed();
+        channel
+            .on('broadcast', { event: 'trigger-calibration' }, () => {
+                // PC hat signalisiert: Kalibriere jetzt!
+                captureTableBaseline();
+            })
+            .subscribe((status) => {
+                if (status === 'SUBSCRIBED') {
+                    // Dem PC sagen, dass das Handy einsatzbereit ist
+                    channel.send({ type: 'broadcast', event: 'phone-connected', payload: {} });
+                    initSensorAccess();
                 }
-            }, 1000);
-        }
+            });
 
-        function captureTableAndProceed() {
-            // Sensor-Werte des Tisches auslesen
-            const captureInitial = (event) => {
-                tableBeta = event.beta || 0;
-                tableGamma = event.gamma || 0;
-                
-                window.removeEventListener('deviceorientation', captureInitial);
-                
-                // Handy vibrieren lassen (falls vom Gerät unterstützt), um zu signalisieren: "Fertig!"
-                if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-                
-                // Zu Schritt 2 wechseln (Visuelles Signal)
-                nextStep(step1, step2);
-
-                // Dem User 4 Sekunden Zeit geben, das Handy an den Monitor zu halten
-                setTimeout(() => {
-                    isLive = true;
-                    nextStep(step2, step3);
-                    window.addEventListener('deviceorientation', handleLiveOrientation);
-                }, 4000);
-            };
-
-            window.addEventListener('deviceorientation', captureInitial);
-        }
-
-        function handleLiveOrientation(event) {
-            if (!isLive) return;
-
-            const currentBeta = event.beta || 0;
-            const currentGamma = event.gamma || 0;
-
-            // Berechnung angepasst an Display-nach-unten Kalibrierung
-            const diffBeta = currentBeta + tableBeta; 
-            const diffGamma = currentGamma - tableGamma; 
-
-            const totalDeviation = Math.sqrt(diffBeta * diffBeta + diffGamma * diffGamma);
-
-            const liveBox = document.getElementById('live-box');
-            const statusMsg = document.getElementById('status-msg');
-            const degreeVal = document.getElementById('degree-val');
-
-            degreeVal.textContent = totalDeviation.toFixed(1);
-
-            if (totalDeviation < 1.5) {
-                liveBox.className = "live-display status-success";
-                statusMsg.textContent = "✓ Perfekt justiert!";
-                // Kurzes Vibrations-Feedback bei Erfolg
-                if (totalDeviation < 1.0 && navigator.vibrate) navigator.vibrate(50);
+        async function initSensorAccess() {
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                // iOS verlangt leider beim allerersten Mal ein kurzes Tippen auf den schwarzen Bildschirm
+                document.body.addEventListener('click', async () => {
+                    await DeviceOrientationEvent.requestPermission();
+                    startGyroStreaming();
+                }, { once: true });
             } else {
-                liveBox.className = "live-display status-error";
-                statusMsg.textContent = "⚠️ Nicht parallel";
+                // Android startet sofort
+                startGyroStreaming();
             }
         }
 
-        function nextStep(current, next) {
-            current.classList.remove('active');
-            next.classList.add('active');
+        function startGyroStreaming() {
+            window.addEventListener('deviceorientation', (event) => {
+                // Sende die rohen Live-Daten permanent an den PC
+                channel.send({
+                    type: 'broadcast',
+                    event: 'gyro-data',
+                    payload: {
+                        beta: event.beta || 0,
+                        gamma: event.gamma || 0
+                    }
+                });
+            });
+        }
+
+        function captureTableBaseline() {
+            // Einmaliges Vibrationssignal ans Loch in der Hand senden: "PC hat kalibriert!"
+            if (navigator.vibrate) navigator.vibrate(200);
         }
     </script>
 </body>
