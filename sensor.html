@@ -3,8 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sensor Kalibrierung</title>
+    <title>Sensor Modus</title>
     <link rel="stylesheet" href="style.css">
+    <style>
+        /* Optimierung für den "No-Touch"-Modus: Große, kontrastreiche Statusbox */
+        .live-display {
+            padding: 3rem 2rem;
+            margin-top: 2rem;
+        }
+        .countdown-val {
+            font-size: 4rem;
+            font-weight: 800;
+            color: var(--accent);
+            margin: 2rem 0;
+        }
+    </style>
 </head>
 <body>
 
@@ -14,18 +27,19 @@
             <div id="step-1" class="step active">
                 <h2>Schritt 1: Tisch-Referenz</h2>
                 <p style="margin-top: 1rem; color: var(--text-muted);">
-                    Lege das Smartphone flach <strong>mit dem Display nach UNTEN</strong> auf deinen Schreibtisch.
+                    Lege das Handy jetzt <strong>flach mit dem Display nach unten</strong> auf den Tisch.
                 </p>
-                <button class="btn" id="start-btn">Sensor erlauben & Tisch speichern</button>
+                <div id="countdown" class="countdown-val">5</div>
+                <p style="color: var(--accent); font-weight: 600;">Kalibrierung läuft automatisch...</p>
             </div>
 
             <div id="step-2" class="step">
                 <h2>Schritt 2: Monitor-Messung</h2>
-                <p style="margin-top: 1rem; color: var(--text-muted);">
-                    Perfekt! Der Tisch-Winkel wurde gespeichert.<br><br>
-                    Halte das Smartphone nun <strong>flach gegen die Vorderseite deines Computer-Monitors</strong>.
+                <p style="margin-top: 1rem; color: var(--text-muted); min-height: 80px;">
+                    ⚡ <strong>Tisch gespeichert!</strong> ⚡<br>
+                    Nimm das Handy jetzt hoch und halte es flach an deinen Monitor.
                 </p>
-                <button class="btn" id="measure-btn">Live-Abgleich starten</button>
+                <div class="countdown-val" style="color: var(--success);">✓</div>
             </div>
 
             <div id="step-3" class="step">
@@ -35,15 +49,15 @@
                     <div id="status-msg" class="status-text">⚠️ Nicht parallel</div>
                     <div class="deviation-val"><span id="degree-val">0.0</span>°</div>
                 </div>
-
-                <button class="btn" id="reset-btn" style="background: transparent; box-shadow: none; border: 1px solid var(--glass-border);">Neu kalibrieren</button>
+                <p style="margin-top: 1.5rem; color: var(--text-muted); font-size: 0.85rem;">
+                    Zum Neustarten der Kalibrierung einfach die Seite neu laden.
+                </p>
             </div>
 
         </div>
     </div>
 
     <script>
-        // Referenzvariablen für die Winkel des Tisches
         let tableBeta = 0;
         let tableGamma = 0;
         let isLive = false;
@@ -51,100 +65,96 @@
         const step1 = document.getElementById('step-1');
         const step2 = document.getElementById('step-2');
         const step3 = document.getElementById('step-3');
+        const countdownEl = document.getElementById('countdown');
 
-        // Hilfsfunktion zum Wechseln der Ansichten
-        function nextStep(current, next) {
-            current.classList.remove('active');
-            next.classList.add('active');
-        }
-
-        // SCHRITT 1: Sensor aktivieren & Tisch-Werte locken
-        document.getElementById('start-btn').addEventListener('click', async () => {
-            // iOS verlangt eine explizite Berechtigung über ein Klick-Event
+        // Sobald die Seite auf dem Handy lädt, starten wir den Ablauf
+        window.addEventListener('load', () => {
+            // Falls iOS nach Rechten fragen muss, aktivieren wir den Sensor beim ersten Touch auf den Screen,
+            // falls der User die Seite öffnet. Für Android läuft es sofort komplett berührungslos.
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                try {
-                    const permissionState = await DeviceOrientationEvent.requestPermission();
-                    if (permissionState === 'granted') {
-                        initCaptureTable();
-                    } else {
-                        alert('Sensor-Zugriff wurde verweigert.');
-                    }
-                } catch (error) {
-                    console.error(error);
-                }
+                // iOS Schutz: Einmaliges Tippen beim Öffnen der Seite aktivieren, falls nötig
+                document.body.addEventListener('click', startAutomatedFlow, { once: true });
+                countdownEl.textContent = "Tippe 1x, dann hinlegen";
             } else {
-                // Android / Desktop Browser
-                initCaptureTable();
+                // Android startet sofort ohne Berührung
+                startAutomatedFlow();
             }
         });
 
-        function initCaptureTable() {
-            // Einmalig aktuelle Werte als Tisch-Referenz sichern
+        function startAutomatedFlow() {
+            let timeLeft = 5;
+            countdownEl.textContent = timeLeft;
+
+            // 5 Sekunden Countdown läuft herunter, während das Handy auf dem Display liegt
+            const timer = setInterval(() => {
+                timeLeft--;
+                countdownEl.textContent = timeLeft;
+
+                if (timeLeft <= 0) {
+                    clearInterval(timer);
+                    captureTableAndProceed();
+                }
+            }, 1000);
+        }
+
+        function captureTableAndProceed() {
+            // Sensor-Werte des Tisches auslesen
             const captureInitial = (event) => {
-                // beta (Neigung nach vorn/hinten), gamma (Neigung nach links/rechts)
                 tableBeta = event.beta || 0;
                 tableGamma = event.gamma || 0;
                 
-                // Event-Listener sofort wieder entfernen, damit wir nur diese Momentaufnahme haben
                 window.removeEventListener('deviceorientation', captureInitial);
                 
-                // Weiter zu Schritt 2
+                // Handy vibrieren lassen (falls vom Gerät unterstützt), um zu signalisieren: "Fertig!"
+                if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+                
+                // Zu Schritt 2 wechseln (Visuelles Signal)
                 nextStep(step1, step2);
+
+                // Dem User 4 Sekunden Zeit geben, das Handy an den Monitor zu halten
+                setTimeout(() => {
+                    isLive = true;
+                    nextStep(step2, step3);
+                    window.addEventListener('deviceorientation', handleLiveOrientation);
+                }, 4000);
             };
+
             window.addEventListener('deviceorientation', captureInitial);
         }
 
-        // SCHRITT 2: Live-Tracking starten
-        document.getElementById('measure-btn').addEventListener('click', () => {
-            isLive = true;
-            nextStep(step2, step3);
-            window.addEventListener('deviceorientation', handleLiveOrientation);
-        });
-
-        // SCHRITT 3: Berechnung & Visuelle Updates
-        // SCHRITT 3: Berechnung & Visuelle Updates (KORRIGIERT für Display-nach-unten Kalibrierung)
         function handleLiveOrientation(event) {
             if (!isLive) return;
 
-            // Wichtig: beta ist die Neigung nach vorn/hinten.
-            // gamma ist die Neigung nach links/rechts (Kippen).
             const currentBeta = event.beta || 0;
             const currentGamma = event.gamma || 0;
 
-            // LOGIK-ANPASSUNG:
-            // Da das Handy beim Kalibrieren auf dem Display lag (um ca. 180 Grad gedreht zur aufrechten Position),
-            // hat sich der Vorzeichen-Sinn der Beta-Achse im Vergleich zur Monitor-Messung umgekehrt.
-            // Wir müssen den Tisch-Winkel 'tableBeta' also addieren statt subtrahieren, um die Null-Linie korrekt zu verschieben.
-            
-            const diffBeta = currentBeta + tableBeta; // KORREKTUR HIER: '+' statt '-'
-            const diffGamma = currentGamma - tableGamma; // Gamma bleibt oft gleich, da das Drehen um die Längsachse stabiler ist.
+            // Berechnung angepasst an Display-nach-unten Kalibrierung
+            const diffBeta = currentBeta + tableBeta; 
+            const diffGamma = currentGamma - tableGamma; 
 
-            // Gesamtabweichung mittels euklidischem Abstand bestimmen
             const totalDeviation = Math.sqrt(diffBeta * diffBeta + diffGamma * diffGamma);
 
-            // UI-Elemente updaten
             const liveBox = document.getElementById('live-box');
             const statusMsg = document.getElementById('status-msg');
             const degreeVal = document.getElementById('degree-val');
 
             degreeVal.textContent = totalDeviation.toFixed(1);
 
-            // Toleranzbereich: Unter 1.5 Grad gilt es als parallel
             if (totalDeviation < 1.5) {
                 liveBox.className = "live-display status-success";
                 statusMsg.textContent = "✓ Perfekt justiert!";
+                // Kurzes Vibrations-Feedback bei Erfolg
+                if (totalDeviation < 1.0 && navigator.vibrate) navigator.vibrate(50);
             } else {
                 liveBox.className = "live-display status-error";
                 statusMsg.textContent = "⚠️ Nicht parallel";
             }
         }
 
-        // Reset-Button Funktionalität
-        document.getElementById('reset-btn').addEventListener('click', () => {
-            isLive = false;
-            window.removeEventListener('deviceorientation', handleLiveOrientation);
-            nextStep(step3, step1);
-        });
+        function nextStep(current, next) {
+            current.classList.remove('active');
+            next.classList.add('active');
+        }
     </script>
 </body>
 </html>
