@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sensor aktiv</title>
+    <title>Sensor-Sender aktiv</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js" type="text/javascript"></script>
     <style>
         body {
-            background: #ef4444; /* Rot signalisiert: Bitte tippen */
+            background: #ef4444; /* Startet Rot als Klick-Aufforderung */
             color: #ffffff;
             display: flex;
             justify-content: center;
@@ -17,10 +17,22 @@
             font-family: sans-serif;
             text-align: center;
             transition: background 0.5s ease;
+            user-select: none;
+            -webkit-user-select: none;
         }
-        .wrapper { padding: 2rem; }
-        h1 { font-size: 2rem; margin-bottom: 1rem; }
-        p { font-size: 1.2rem; opacity: 0.9; }
+        .wrapper {
+            padding: 2rem;
+        }
+        h1 {
+            font-size: 2.2rem;
+            margin-bottom: 1rem;
+            font-weight: bold;
+        }
+        p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+            line-height: 1.5;
+        }
     </style>
 </head>
 <body>
@@ -31,17 +43,25 @@
     </div>
 
     <script>
+        // Auslesen der Raum-ID aus der URL
         const urlParams = new URLSearchParams(window.location.search);
         const roomId = urlParams.get('room');
 
+        // Verbindung zum selben MQTT Broker aufbauen
         const client = new Paho.MQTT.Client("broker.hivemq.com", Number(8000), "phone_" + roomId);
         let mqttConnected = false;
+        let sensorsActive = false;
 
-        client.onConnectionLost = () => { mqttConnected = false; };
+        client.onConnectionLost = () => { 
+            mqttConnected = false; 
+            console.log("Verbindung zum MQTT-Server verloren.");
+        };
+        
+        // Empfängt Nachrichten (z.B. den Vibrationsbefehl vom PC)
         client.onMessageArrived = (message) => {
             const data = JSON.parse(message.payloadString);
             if (data.type === 'trigger-vibrate' && navigator.vibrate) {
-                navigator.vibrate(200); // Handy vibriert, wenn am PC kalibriert wurde
+                navigator.vibrate(200); // Handy vibriert kurz
             }
         };
 
@@ -49,46 +69,58 @@
             onSuccess: () => {
                 client.subscribe("wasserwaage/" + roomId);
                 mqttConnected = true;
+                console.log("Handy-Client erfolgreich mit Broker verbunden.");
             },
             useSSL: true
         });
 
-        // Klick schaltet Gyro frei
+        // Aktivierung der Bewegungssensoren durch Klick auf den Bildschirm
         document.body.addEventListener('click', async () => {
-            document.getElementById('status-wrapper').innerHTML = "<h1>Sensor aktiv!</h1><p>Schau jetzt auf deinen PC-Bildschirm.</p>";
-            document.body.style.background = "#000000"; // Wird schwarz, kann weggelegt werden
+            if (sensorsActive) return;
+            
+            const wrapper = document.getElementById('status-wrapper');
+            wrapper.innerHTML = "<h1>Sensor aktiv!</h1><p>Lege das Handy nun auf den Tisch und schaue auf deinen PC-Monitor.</p>";
+            document.body.style.background = "#000000"; // Bildschirm wird schwarz
 
+            // Sicherheitsabfrage für iOS (iPhones) ab Version 13
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 try {
                     const permission = await DeviceOrientationEvent.requestPermission();
-                    if (permission === 'granted') startStreaming();
-                } catch(e) { alert("Fehler: " + e); }
+                    if (permission === 'granted') {
+                        startStreaming();
+                    } else {
+                        alert("Zugriff auf Bewegungssensoren wurde verweigert.");
+                    }
+                } catch(e) {
+                    alert("Fehler bei der iOS-Rechteabfrage: " + e);
+                }
             } else {
+                // Android und Desktop-Browser starten ohne Rechte-Pop-up
                 startStreaming();
             }
         });
 
+        // Funktion zum fortlaufenden Senden der Live-Daten
         function startStreaming() {
-            // Signalisiert dem PC SOFORT: Ich habe gescannt, du kannst umspringen!
-            sendToPC({ type: 'phone-connected' });
-
-            // Streamt die Daten live an den PC
+            sensorsActive = true;
+            
             window.addEventListener('deviceorientation', (event) => {
-                sendToPC({
+                if (!mqttConnected) return;
+
+                const payload = {
                     type: 'gyro-data',
                     beta: event.beta || 0,
                     gamma: event.gamma || 0
-                });
-            });
-        }
+                };
 
-        function sendToPC(obj) {
-            if (!mqttConnected) return;
-            try {
-                const message = new Paho.MQTT.Message(JSON.stringify(obj));
-                message.destinationName = "wasserwaage/" + roomId;
-                client.send(message);
-            } catch(e) {}
+                try {
+                    const message = new Paho.MQTT.Message(JSON.stringify(payload));
+                    message.destinationName = "wasserwaage/" + roomId;
+                    client.send(message);
+                } catch(e) {
+                    console.error("Fehler beim Senden der Gyro-Daten:", e);
+                }
+            });
         }
     </script>
 </body>
