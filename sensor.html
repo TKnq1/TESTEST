@@ -2,173 +2,149 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Handy-Neigungsmesser</title>
-    <style>
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
-        body {
-            font-family: 'Segoe UI', sans-serif;
-            background: linear-gradient(135deg, #1e3c72, #2a5298);
-            color: white;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            padding: 20px;
-            text-align: center;
-        }
-        .container {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 30px;
-            border-radius: 20px;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            max-width: 400px;
-            width: 100%;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-        }
-        h1 { font-size: 1.8rem; margin-bottom: 20px; }
-        p { font-size: 1rem; color: #e0e0e0; margin-bottom: 30px; line-height: 1.5; }
-        
-        /* Live-Anzeige der Werte */
-        .werte-box {
-            background: rgba(0,0,0,0.3);
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 25px;
-            font-family: monospace;
-            font-size: 1.1rem;
-        }
-        
-        button {
-            background: #27ae60;
-            color: white;
-            border: none;
-            padding: 15px 30px;
-            font-size: 1.1rem;
-            border-radius: 50px;
-            cursor: pointer;
-            font-weight: bold;
-            transition: background 0.2s, transform 0.1s;
-            width: 100%;
-        }
-        button:hover { background: #2ecc71; transform: scale(1.02); }
-        button:active { transform: scale(0.98); }
-        
-        .vergleich {
-            margin-top: 20px;
-            padding-top: 20px;
-            border-top: 1px solid rgba(255,255,255,0.2);
-            display: none; /* Wird erst bei Schritt 3 sichtbar */
-        }
-        .ergebnis {
-            font-size: 1.3rem;
-            font-weight: bold;
-            margin-top: 10px;
-        }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Sensor Kalibrierung</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-    <div class="container">
-        <h1 id="schritt-titel">Schritt 1: Tisch messen</h1>
-        <p id="anweisung">Lege das Handy flach auf den Tisch, sodass der Bildschirm nach UNTEN zeigt.</p>
+    <div class="sensor-container">
+        <div class="step-card">
+            
+            <div id="step-1" class="step active">
+                <h2>Schritt 1: Tisch-Referenz</h2>
+                <p style="margin-top: 1rem; color: var(--text-muted);">
+                    Lege das Smartphone flach <strong>mit dem Display nach UNTEN</strong> auf deinen Schreibtisch.
+                </p>
+                <button class="btn" id="start-btn">Sensor erlauben & Tisch speichern</button>
+            </div>
 
-        <div class="werte-box">
-            Neigung X: <span id="valX">0.0</span>°<br>
-            Neigung Y: <span id="valY">0.0</span>°
-        </div>
+            <div id="step-2" class="step">
+                <h2>Schritt 2: Monitor-Messung</h2>
+                <p style="margin-top: 1rem; color: var(--text-muted);">
+                    Perfekt! Der Tisch-Winkel wurde gespeichert.<br><br>
+                    Halte das Smartphone nun <strong>flach gegen die Vorderseite deines Computer-Monitors</strong>.
+                </p>
+                <button class="btn" id="measure-btn">Live-Abgleich starten</button>
+            </div>
 
-        <button id="action-btn" onclick="nextStep()">Berechtigung erteilen</button>
+            <div id="step-3" class="step">
+                <h2>Schritt 3: Live-Abgleich</h2>
+                
+                <div id="live-box" class="live-display status-error">
+                    <div id="status-msg" class="status-text">⚠️ Nicht parallel</div>
+                    <div class="deviation-val"><span id="degree-val">0.0</span>°</div>
+                </div>
 
-        <div id="vergleichs-bereich" class="vergleich">
-            <h3>Tisch-Wert (Gespeichert):</h3>
-            <p id="tisch-wert">X: 0°, Y: 0°</p>
-            <h3>Differenz zum Monitor:</h3>
-            <div id="differenz-ergebnis" class="ergebnis">Berechne...</div>
+                <button class="btn" id="reset-btn" style="background: transparent; box-shadow: none; border: 1px solid var(--glass-border);">Neu kalibrieren</button>
+            </div>
+
         </div>
     </div>
 
     <script>
-        let aktuellerSchritt = 0; // 0 = Berechtigung, 1 = Tisch, 2 = Monitor
-        let currentX = 0, currentY = 0;
-        let tischX = 0, tischY = 0;
+        // Referenzvariablen für die Winkel des Tisches
+        let tableBeta = 0;
+        let tableGamma = 0;
+        let isLive = false;
 
-        // Funktion, um die Sensoren auszulesen
-        function starteSensor() {
-            window.addEventListener('deviceorientation', (event) => {
-                // beta (X) und gamma (Y) liefern die Neigungswinkel in Grad
-                currentX = event.beta ? event.beta.toFixed(1) : 0;
-                currentY = event.gamma ? event.gamma.toFixed(1) : 0;
+        const step1 = document.getElementById('step-1');
+        const step2 = document.getElementById('step-2');
+        const step3 = document.getElementById('step-3');
 
-                // Live-Werte auf dem Bildschirm aktualisieren
-                document.getElementById('valX').innerText = currentX;
-                document.getElementById('valY').innerText = currentY;
+        // Hilfsfunktion zum Wechseln der Ansichten
+        function nextStep(current, next) {
+            current.classList.remove('active');
+            next.classList.add('active');
+        }
 
-                // Wenn wir in Schritt 2 (Monitor-Abgleich) sind, berechne die Differenz
-                if (aktuellerSchritt === 2) {
-                    let diffX = (currentX - tischX).toFixed(1);
-                    let diffY = (currentY - tischY).toFixed(1);
-                    
-                    let ergebnisText = `Abweichung: X: ${diffX}° | Y: ${diffY}°`;
-                    
-                    // Wenn die Abweichung fast 0 ist, ist es perfekt justiert!
-                    if (Math.abs(diffX) < 1 && Math.abs(diffY) < 1) {
-                        document.getElementById('differenz-ergebnis').innerHTML = `<span style="color: #2ecc71;">✓ Perfekt justiert!</span><br>${ergebnisText}`;
+        // SCHRITT 1: Sensor aktivieren & Tisch-Werte locken
+        document.getElementById('start-btn').addEventListener('click', async () => {
+            // iOS verlangt eine explizite Berechtigung über ein Klick-Event
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                try {
+                    const permissionState = await DeviceOrientationEvent.requestPermission();
+                    if (permissionState === 'granted') {
+                        initCaptureTable();
                     } else {
-                        document.getElementById('differenz-ergebnis').innerHTML = `<span style="color: #e74c3c;">⚠️ Nicht parallel</span><br>${ergebnisText}`;
+                        alert('Sensor-Zugriff wurde verweigert.');
                     }
+                } catch (error) {
+                    console.error(error);
                 }
-            });
-        }
-
-        // Die Logik für die Schritte
-        function nextStep() {
-            // SCHRITT 0: iOS verlangt seit einigen Jahren eine explizite Erlaubnis für Sensoren
-            if (aktuellerSchritt === 0) {
-                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                    DeviceOrientationEvent.requestPermission()
-                        .then(response => {
-                            if (response == 'granted') {
-                                starteSensor();
-                                geheZuSchritt1();
-                            } else {
-                                alert("Sensor-Berechtigung wurde abgelehnt.");
-                            }
-                        })
-                        .catch(console.error);
-                } else {
-                    // Android und ältere Geräte brauchen keine Erlaubnis
-                    starteSensor();
-                    geheZuSchritt1();
-                }
-                return;
+            } else {
+                // Android / Desktop Browser
+                initCaptureTable();
             }
+        });
 
-            // SCHRITT 1: Tisch-Neigung speichern
-            if (aktuellerSchritt === 1) {
-                tischX = currentX;
-                tischY = currentY;
+        function initCaptureTable() {
+            // Einmalig aktuelle Werte als Tisch-Referenz sichern
+            const captureInitial = (event) => {
+                // beta (Neigung nach vorn/hinten), gamma (Neigung nach links/rechts)
+                tableBeta = event.beta || 0;
+                tableGamma = event.gamma || 0;
                 
-                // Text anpassen für Schritt 2
-                document.getElementById('schritt-titel').innerText = "Schritt 2: Monitor abgleichen";
-                document.getElementById('anweisung').innerText = "Lege das Handy nun flach an deinen Monitor (oder halte es parallel dazu), um die Neigung zu vergleichen und zu adjustieren.";
-                document.getElementById('tisch-wert').innerText = `X: ${tischX}°, Y: ${tischY}°`;
-                document.getElementById('vergleichs-bereich').style.display = "block";
-                document.getElementById('action-btn').style.display = "none"; // Button ausblenden, da ab jetzt live verglichen wird
+                // Event-Listener sofort wieder entfernen, damit wir nur diese Momentaufnahme haben
+                window.removeEventListener('deviceorientation', captureInitial);
                 
-                aktuellerSchritt = 2;
+                // Weiter zu Schritt 2
+                nextStep(step1, step2);
+            };
+            window.addEventListener('deviceorientation', captureInitial);
+        }
+
+        // SCHRITT 2: Live-Tracking starten
+        document.getElementById('measure-btn').addEventListener('click', () => {
+            isLive = true;
+            nextStep(step2, step3);
+            window.addEventListener('deviceorientation', handleLiveOrientation);
+        });
+
+        // SCHRITT 3: Berechnung & Visuelle Updates
+        // SCHRITT 3: Berechnung & Visuelle Updates (KORRIGIERT für Display-nach-unten Kalibrierung)
+        function handleLiveOrientation(event) {
+            if (!isLive) return;
+
+            // Wichtig: beta ist die Neigung nach vorn/hinten.
+            // gamma ist die Neigung nach links/rechts (Kippen).
+            const currentBeta = event.beta || 0;
+            const currentGamma = event.gamma || 0;
+
+            // LOGIK-ANPASSUNG:
+            // Da das Handy beim Kalibrieren auf dem Display lag (um ca. 180 Grad gedreht zur aufrechten Position),
+            // hat sich der Vorzeichen-Sinn der Beta-Achse im Vergleich zur Monitor-Messung umgekehrt.
+            // Wir müssen den Tisch-Winkel 'tableBeta' also addieren statt subtrahieren, um die Null-Linie korrekt zu verschieben.
+            
+            const diffBeta = currentBeta + tableBeta; // KORREKTUR HIER: '+' statt '-'
+            const diffGamma = currentGamma - tableGamma; // Gamma bleibt oft gleich, da das Drehen um die Längsachse stabiler ist.
+
+            // Gesamtabweichung mittels euklidischem Abstand bestimmen
+            const totalDeviation = Math.sqrt(diffBeta * diffBeta + diffGamma * diffGamma);
+
+            // UI-Elemente updaten
+            const liveBox = document.getElementById('live-box');
+            const statusMsg = document.getElementById('status-msg');
+            const degreeVal = document.getElementById('degree-val');
+
+            degreeVal.textContent = totalDeviation.toFixed(1);
+
+            // Toleranzbereich: Unter 1.5 Grad gilt es als parallel
+            if (totalDeviation < 1.5) {
+                liveBox.className = "live-display status-success";
+                statusMsg.textContent = "✓ Perfekt justiert!";
+            } else {
+                liveBox.className = "live-display status-error";
+                statusMsg.textContent = "⚠️ Nicht parallel";
             }
         }
 
-        function geheZuSchritt1() {
-            aktuellerSchritt = 1;
-            document.getElementById('action-btn').innerText = "Tisch-Neigung speichern";
-        }
+        // Reset-Button Funktionalität
+        document.getElementById('reset-btn').addEventListener('click', () => {
+            isLive = false;
+            window.removeEventListener('deviceorientation', handleLiveOrientation);
+            nextStep(step3, step1);
+        });
     </script>
 </body>
 </html>
