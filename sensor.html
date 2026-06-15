@@ -42,26 +42,23 @@
         <p>Um die Sensor-Verbindung zum PC freizuschalten.</p>
     </div>
 
-    <script>
-        // Auslesen der Raum-ID aus der URL
+   <script>
         const urlParams = new URLSearchParams(window.location.search);
         const roomId = urlParams.get('room');
 
-        // Verbindung zum selben MQTT Broker aufbauen
-        const client = new Paho.MQTT.Client("broker.hivemq.com", Number(8000), "phone_" + roomId);
+        // Server und Port an den PC angepasst (iot.eclipse.org auf Port 443 oder broker.hivemq.com auf 8001)
+        const client = new Paho.MQTT.Client("iot.eclipse.org", Number(443), "phone_" + roomId);
         let mqttConnected = false;
         let sensorsActive = false;
 
         client.onConnectionLost = () => { 
             mqttConnected = false; 
-            console.log("Verbindung zum MQTT-Server verloren.");
         };
         
-        // Empfängt Nachrichten (z.B. den Vibrationsbefehl vom PC)
         client.onMessageArrived = (message) => {
             const data = JSON.parse(message.payloadString);
             if (data.type === 'trigger-vibrate' && navigator.vibrate) {
-                navigator.vibrate(200); // Handy vibriert kurz
+                navigator.vibrate(200); 
             }
         };
 
@@ -69,20 +66,18 @@
             onSuccess: () => {
                 client.subscribe("wasserwaage/" + roomId);
                 mqttConnected = true;
-                console.log("Handy-Client erfolgreich mit Broker verbunden.");
             },
-            useSSL: true
+            useSSL: true,
+            timeout: 3
         });
 
-        // Aktivierung der Bewegungssensoren durch Klick auf den Bildschirm
         document.body.addEventListener('click', async () => {
             if (sensorsActive) return;
             
             const wrapper = document.getElementById('status-wrapper');
             wrapper.innerHTML = "<h1>Sensor aktiv!</h1><p>Lege das Handy nun auf den Tisch und schaue auf deinen PC-Monitor.</p>";
-            document.body.style.background = "#000000"; // Bildschirm wird schwarz
+            document.body.style.background = "#000000";
 
-            // Sicherheitsabfrage für iOS (iPhones) ab Version 13
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 try {
                     const permission = await DeviceOrientationEvent.requestPermission();
@@ -95,12 +90,10 @@
                     alert("Fehler bei der iOS-Rechteabfrage: " + e);
                 }
             } else {
-                // Android und Desktop-Browser starten ohne Rechte-Pop-up
                 startStreaming();
             }
         });
 
-        // Funktion zum fortlaufenden Senden der Live-Daten
         function startStreaming() {
             sensorsActive = true;
             
@@ -117,9 +110,7 @@
                     const message = new Paho.MQTT.Message(JSON.stringify(payload));
                     message.destinationName = "wasserwaage/" + roomId;
                     client.send(message);
-                } catch(e) {
-                    console.error("Fehler beim Senden der Gyro-Daten:", e);
-                }
+                } catch(e) {}
             });
         }
     </script>
