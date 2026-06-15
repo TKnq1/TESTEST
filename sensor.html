@@ -7,7 +7,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js" type="text/javascript"></script>
     <style>
         body {
-            background: #ef4444; /* Startet Rot als Signal, dass man klicken muss */
+            background: #ef4444; /* Rot signalisiert: Bitte tippen */
             color: #ffffff;
             display: flex;
             justify-content: center;
@@ -17,11 +17,8 @@
             font-family: sans-serif;
             text-align: center;
             transition: background 0.5s ease;
-            user-select: none;
         }
-        .wrapper {
-            padding: 2rem;
-        }
+        .wrapper { padding: 2rem; }
         h1 { font-size: 2rem; margin-bottom: 1rem; }
         p { font-size: 1.2rem; opacity: 0.9; }
     </style>
@@ -29,15 +26,14 @@
 <body>
 
     <div class="wrapper" id="status-wrapper">
-        <h1>HIER TIPPEN!</h1>
-        <p>Danach sofort flach mit dem Display nach unten auf den Tisch legen.</p>
+        <h1>HIER TIPPEN</h1>
+        <p>Um die Sensor-Verbindung zum PC freizuschalten.</p>
     </div>
 
     <script>
         const urlParams = new URLSearchParams(window.location.search);
         const roomId = urlParams.get('room');
 
-        // Verbindung zum MQTT Server aufbauen
         const client = new Paho.MQTT.Client("broker.hivemq.com", Number(8000), "phone_" + roomId);
         let mqttConnected = false;
 
@@ -45,7 +41,7 @@
         client.onMessageArrived = (message) => {
             const data = JSON.parse(message.payloadString);
             if (data.type === 'trigger-vibrate' && navigator.vibrate) {
-                navigator.vibrate(200);
+                navigator.vibrate(200); // Handy vibriert, wenn am PC kalibriert wurde
             }
         };
 
@@ -57,31 +53,26 @@
             useSSL: true
         });
 
-        // Beim Klick auf den Bildschirm Sensorrechte einfordern und Stream starten
+        // Klick schaltet Gyro frei
         document.body.addEventListener('click', async () => {
-            document.getElementById('status-wrapper').innerHTML = "<h1>Aktiviert!</h1><p>Wird kalibriert...</p>";
-            document.body.style.background = "#000000"; // Bildschirm wird schwarz für den Tisch-Modus
+            document.getElementById('status-wrapper').innerHTML = "<h1>Sensor aktiv!</h1><p>Schau jetzt auf deinen PC-Bildschirm.</p>";
+            document.body.style.background = "#000000"; // Wird schwarz, kann weggelegt werden
 
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 try {
                     const permission = await DeviceOrientationEvent.requestPermission();
-                    if (permission === 'granted') {
-                        startStreaming();
-                    } else {
-                        alert("Sensor-Berechtigung wurde verweigert!");
-                    }
-                } catch(e) { alert("Fehler bei iOS-Rechten: " + e); }
+                    if (permission === 'granted') startStreaming();
+                } catch(e) { alert("Fehler: " + e); }
             } else {
-                // Android & andere
                 startStreaming();
             }
         });
 
         function startStreaming() {
-            // Dem PC sofort sagen, dass wir bereit sind
+            // Signalisiert dem PC SOFORT: Ich habe gescannt, du kannst umspringen!
             sendToPC({ type: 'phone-connected' });
 
-            // Permanent die Gyro-Daten an den PC senden
+            // Streamt die Daten live an den PC
             window.addEventListener('deviceorientation', (event) => {
                 sendToPC({
                     type: 'gyro-data',
@@ -97,7 +88,7 @@
                 const message = new Paho.MQTT.Message(JSON.stringify(obj));
                 message.destinationName = "wasserwaage/" + roomId;
                 client.send(message);
-            } catch(e) { console.error(e); }
+            } catch(e) {}
         }
     </script>
 </body>
