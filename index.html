@@ -15,15 +15,24 @@
             
             <div id="pc-step-1" class="step active">
                 <p>1. Scanne den QR-Code mit deinem Smartphone.</p>
-                <p style="margin-bottom: 1.5rem; color: var(--accent); font-weight: bold;">2. Tippe auf den roten Handybildschirm!</p>
-                <button class="btn" id="pc-calibrate-btn" disabled style="opacity: 0.5; cursor: not-allowed;">Warte auf Smartphone-Verbindung...</button>
+                <p style="margin-top: 1rem; color: var(--accent); font-weight: bold;">
+                    Sobald das Handy verbunden ist, öffnet sich die Wasserwaage automatisch...
+                </p>
             </div>
 
             <div id="pc-step-2" class="step">
-                <p style="margin-bottom: 1.5rem;">3. Nimm das Handy jetzt hoch und halte es <strong>flach an deinen Monitor</strong>.</p>
+                <p style="margin-bottom: 1rem;">
+                    2. Lege das Handy <strong>flach mit dem Display nach unten</strong> auf den Tisch und klicke hier:
+                </p>
                 
+                <button class="btn" id="pc-calibrate-btn" style="margin-bottom: 2rem;">Tisch-Neigung jetzt speichern</button>
+                
+                <p style="margin-bottom: 1rem; display: none;" id="instruction-step-3">
+                    3. Nimm das Handy jetzt hoch und halte es <strong>flach an deinen Monitor</strong>, um ihn zu justieren.
+                </p>
+
                 <div id="live-box" class="live-display status-error">
-                    <div id="status-msg" class="status-text">⚠️ Nicht parallel</div>
+                    <div id="status-msg" class="status-text">⚠️ Warte auf Kalibrierung</div>
                     <div class="deviation-val"><span id="degree-val">0.0</span>°</div>
                 </div>
             </div>
@@ -41,7 +50,7 @@
     <script>
         const sessionId = 'room_' + Math.random().toString(36).substr(2, 9);
         
-        // Dynamischer QR-Code Link
+        // QR-Code Link generieren
         const sensorUrl = `https://tknq1.github.io/TESTEST/sensor.html?room=${sessionId}`;
         document.getElementById('qr-img').src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(sensorUrl)}`;
 
@@ -49,59 +58,61 @@
 
         let tableBeta = 0;
         let tableGamma = 0;
-        let calibrating = false;
+        let isCalibrated = false;
+        
         let currentLiveBeta = 0;
         let currentLiveGamma = 0;
 
-        client.onConnectionLost = () => { console.log("Verbindung zum Server verloren"); };
+        client.onConnectionLost = () => { console.log("Verbindung verloren"); };
         
         client.onMessageArrived = (message) => {
             const data = JSON.parse(message.payloadString);
             
-            // Handy hat sich erfolgreich gemeldet
+            // AUTOMATISCHER WECHSEL: Handy hat gescannt und schaltet den PC sofort weiter!
             if (data.type === 'phone-connected') {
-                const btn = document.getElementById('pc-calibrate-btn');
                 document.getElementById('connection-status').textContent = 'Status: Verbunden ✔';
                 document.getElementById('connection-status').style.color = 'var(--success)';
-                btn.disabled = false;
-                btn.style.opacity = "1";
-                btn.style.cursor = "pointer";
-                btn.textContent = 'Tisch-Neigung jetzt speichern';
+                
+                // QR-Code ausblenden, da nicht mehr benötigt
+                document.getElementById('qr-section').style.display = 'none';
+                // Layout auf volle Breite strecken
+                document.querySelector('.container').style.gridTemplateColumns = '1fr';
+
+                // Sofort von Schritt 1 zu Schritt 2 (Wasserwaage) wechseln
+                document.getElementById('pc-step-1').classList.remove('active');
+                document.getElementById('pc-step-2').classList.add('active');
             }
             
-            // Gyro-Daten vom Handy empfangen
+            // Permanente Sensordaten vom Handy empfangen
             if (data.type === 'gyro-data') {
                 currentLiveBeta = data.beta;
                 currentLiveGamma = data.gamma;
 
-                // Wenn der Button geklickt wurde, loggen wir genau diesen Moment als Tisch-Referenz
-                if (calibrating) {
-                    tableBeta = currentLiveBeta;
-                    tableGamma = currentLiveGamma;
-                    calibrating = false;
-                    
-                    // Sofort umschalten auf Monitor-Live-Ansicht
-                    document.getElementById('pc-step-1').classList.remove('active');
-                    document.getElementById('pc-step-2').classList.add('active');
-                } else if (tableBeta !== 0) {
-                    // Wenn kalibriert, berechne permanent die Differenz
+                // Wenn bereits eingemessen wurde, rechne permanent die Differenz aus
+                if (isCalibrated) {
                     handleLiveCalculation(currentLiveBeta, currentLiveGamma);
                 }
             }
         };
 
         client.connect({
-            onSuccess: () => {
-                client.subscribe("wasserwaage/" + sessionId);
-            },
+            onSuccess: () => { client.subscribe("wasserwaage/" + sessionId); },
             useSSL: true
         });
 
-        // Klick auf den PC-Button speichert den aktuellen Wert
+        // BUTTON AM PC: Kalibriert den Tisch bei Klick
         document.getElementById('pc-calibrate-btn').addEventListener('click', () => {
-            calibrating = true;
+            // Speichert die exakt in diesem Moment anliegenden Handy-Werte als Null-Linie
+            tableBeta = currentLiveBeta;
+            tableGamma = currentLiveGamma;
+            isCalibrated = true;
             
-            // Vibrations-Befehl ans Handy schicken
+            // Text-Anweisungen auf dem PC anpassen
+            document.getElementById('instruction-step-3').style.display = 'block';
+            document.getElementById('pc-calibrate-btn').textContent = '✓ Tisch gespeichert (Erneut kalibrieren)';
+            document.getElementById('pc-calibrate-btn').style.background = 'rgba(255,255,255,0.1)';
+
+            // Vibrations-Feedback an das Handy senden (Bestätigung)
             try {
                 const message = new Paho.MQTT.Message(JSON.stringify({ type: 'trigger-vibrate' }));
                 message.destinationName = "wasserwaage/" + sessionId;
@@ -110,7 +121,7 @@
         });
 
         function handleLiveCalculation(currentBeta, currentGamma) {
-            // Berechnung basierend auf der Display-nach-unten Lage des Handys auf dem Tisch
+            // Berechnung (angepasst an Display-nach-unten Lage auf dem Tisch)
             const diffBeta = currentBeta + tableBeta; 
             const diffGamma = currentGamma - tableGamma; 
             const totalDeviation = Math.sqrt(diffBeta * diffBeta + diffGamma * diffGamma);
