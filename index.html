@@ -47,10 +47,8 @@
     </div>
 
     <script>
-        // Feste oder zufällige ID nutzen
         const sessionId = 'room_' + Math.random().toString(36).substr(2, 9);
         
-        // QR-Code Link generieren
         const sensorUrl = `https://tknq1.github.io/TESTEST/sensor.html?room=${sessionId}`;
         document.getElementById('qr-img').src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(sensorUrl)}`;
 
@@ -66,12 +64,10 @@
         client.onMessageArrived = (message) => {
             const data = JSON.parse(message.payloadString);
             
-            // Handy-Sensordaten empfangen
             if (data.type === 'gyro-data') {
                 currentLiveBeta = data.beta;
                 currentLiveGamma = data.gamma;
 
-                // Statusanzeige updaten, sobald überhaupt Daten ankommen
                 document.getElementById('connection-status').textContent = 'Status: Live-Daten empfangen ✔';
                 document.getElementById('connection-status').style.color = 'var(--success)';
 
@@ -86,30 +82,26 @@
             useSSL: true
         });
 
-        // MANUELLER SEITENWECHSEL-BUTTON AM PC
         document.getElementById('pc-start-level-btn').addEventListener('click', () => {
-            // QR-Code ausblenden
             document.getElementById('qr-section').style.display = 'none';
-            // Layout anpassen (Zweispaltig auf Einspaltig umschalten)
             document.getElementById('main-container').style.display = 'block';
             document.getElementById('main-container').style.maxWidth = '600px';
-
-            // Schritt 1 ausblenden, Schritt 2 einblenden
             document.getElementById('pc-step-1').classList.remove('active');
             document.getElementById('pc-step-2').classList.add('active');
         });
 
-        // TISCH KALIBRIEREN BUTTON
+        // KORRIGIERTER KALIBRIERUNGS-BUTTON (Erlaubt unendlich viele Klicks)
         document.getElementById('pc-calibrate-btn').addEventListener('click', () => {
+            // Werte eintragen
             tableBeta = currentLiveBeta;
             tableGamma = currentLiveGamma;
             isCalibrated = true;
             
             document.getElementById('instruction-step-3').style.display = 'block';
-            document.getElementById('pc-calibrate-btn').textContent = '✓ Tisch gespeichert (Erneut kalibrieren)';
-            document.getElementById('pc-calibrate-btn').style.background = 'rgba(255,255,255,0.1)';
+            document.getElementById('pc-calibrate-btn').textContent = '🔄 Neu kalibrieren (Wert aktualisiert)';
+            document.getElementById('pc-calibrate-btn').style.background = 'rgba(129, 140, 248, 0.2)';
 
-            // Signal ans Handy senden, damit es kurz vibriert
+            // Signal ans Handy senden (Vibration)
             try {
                 const message = new Paho.MQTT.Message(JSON.stringify({ type: 'trigger-vibrate' }));
                 message.destinationName = "wasserwaage/" + sessionId;
@@ -117,9 +109,17 @@
             } catch(e) {}
         });
 
+        // NEUE MATHEMATISCHE BERECHNUNG
         function handleLiveCalculation(currentBeta, currentGamma) {
-            const diffBeta = currentBeta + tableBeta; 
-            const diffGamma = currentGamma - tableGamma; 
+            // Math.abs() verhindert Vorzeichen-Fehler (berechnet den absoluten Abstand zur Null-Linie)
+            let diffBeta = Math.abs(currentBeta - tableBeta);
+            let diffGamma = Math.abs(currentGamma - tableGamma);
+
+            // Falls das Handy komplett umgedreht wurde (Tisch vs. Monitor), korrigieren wir den 180-Grad-Sturz
+            if (diffBeta > 90) diffBeta = Math.abs(diffBeta - 180);
+            if (diffGamma > 90) diffGamma = Math.abs(diffGamma - 180);
+
+            // Euklidischer Abstand für die Gesamtabweichung im Raum
             const totalDeviation = Math.sqrt(diffBeta * diffBeta + diffGamma * diffGamma);
 
             const liveBox = document.getElementById('live-box');
@@ -128,7 +128,7 @@
 
             degreeVal.textContent = totalDeviation.toFixed(1);
 
-            if (totalDeviation < 1.5) {
+            if (totalDeviation < 2.0) { // Toleranz leicht erhöht auf 2.0 Grad für stabileres Justieren
                 liveBox.className = "live-display status-success";
                 statusMsg.textContent = "✓ Perfekt parallel!";
             } else {
