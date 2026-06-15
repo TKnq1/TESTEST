@@ -15,8 +15,8 @@
             
             <div id="pc-step-1" class="step active">
                 <p>1. Scanne den QR-Code mit deinem Smartphone.</p>
-                <p style="margin-bottom: 1.5rem;">2. Lege das Handy <strong>flach mit dem Display nach unten</strong> auf den Tisch.</p>
-                <button class="btn" id="pc-calibrate-btn" disabled>Warte auf Smartphone-Verbindung...</button>
+                <p style="margin-bottom: 1.5rem; color: var(--accent); font-weight: bold;">2. Tippe auf den roten Handybildschirm!</p>
+                <button class="btn" id="pc-calibrate-btn" disabled style="opacity: 0.5; cursor: not-allowed;">Warte auf Smartphone-Verbindung...</button>
             </div>
 
             <div id="pc-step-2" class="step">
@@ -39,69 +39,78 @@
     </div>
 
     <script>
-        // Generiere eine einzigartige Session-ID
         const sessionId = 'room_' + Math.random().toString(36).substr(2, 9);
         
-        // Dynamischer QR-Code Link zu deinem Repository
+        // Dynamischer QR-Code Link
         const sensorUrl = `https://tknq1.github.io/TESTEST/sensor.html?room=${sessionId}`;
         document.getElementById('qr-img').src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(sensorUrl)}`;
 
-        // Verbindung zum öffentlichen, kostenlosen HiveMQ Web-Broker
         const client = new Paho.MQTT.Client("broker.hivemq.com", Number(8000), "pc_" + sessionId);
 
         let tableBeta = 0;
         let tableGamma = 0;
         let calibrating = false;
+        let currentLiveBeta = 0;
+        let currentLiveGamma = 0;
 
-        client.onConnectionLost = (responseObject) => { if (responseObject.errorCode !== 0) console.log("Verbindung verloren:"+responseObject.errorMessage); };
+        client.onConnectionLost = () => { console.log("Verbindung zum Server verloren"); };
         
-        // Wenn Nachrichten vom Handy ankommen
         client.onMessageArrived = (message) => {
             const data = JSON.parse(message.payloadString);
             
+            // Handy hat sich erfolgreich gemeldet
             if (data.type === 'phone-connected') {
+                const btn = document.getElementById('pc-calibrate-btn');
                 document.getElementById('connection-status').textContent = 'Status: Verbunden ✔';
                 document.getElementById('connection-status').style.color = 'var(--success)';
-                document.getElementById('pc-calibrate-btn').disabled = false;
-                document.getElementById('pc-calibrate-btn').textContent = 'Tisch-Neigung jetzt speichern';
+                btn.disabled = false;
+                btn.style.opacity = "1";
+                btn.style.cursor = "pointer";
+                btn.textContent = 'Tisch-Neigung jetzt speichern';
             }
             
+            // Gyro-Daten vom Handy empfangen
             if (data.type === 'gyro-data') {
+                currentLiveBeta = data.beta;
+                currentLiveGamma = data.gamma;
+
+                // Wenn der Button geklickt wurde, loggen wir genau diesen Moment als Tisch-Referenz
                 if (calibrating) {
-                    // Speichert den aktuellen Wert des Handys als Tisch-Referenz
-                    tableBeta = data.beta;
-                    tableGamma = data.gamma;
+                    tableBeta = currentLiveBeta;
+                    tableGamma = currentLiveGamma;
                     calibrating = false;
                     
-                    // Schaltet auf die Live-Ansicht um
+                    // Sofort umschalten auf Monitor-Live-Ansicht
                     document.getElementById('pc-step-1').classList.remove('active');
                     document.getElementById('pc-step-2').classList.add('active');
                 } else if (tableBeta !== 0) {
-                    // Führe die Berechnung aus, sobald der Tisch einmal eingemessen wurde
-                    handleLiveCalculation(data.beta, data.gamma);
+                    // Wenn kalibriert, berechne permanent die Differenz
+                    handleLiveCalculation(currentLiveBeta, currentLiveGamma);
                 }
             }
         };
 
         client.connect({
             onSuccess: () => {
-                // Abonniere das Thema für diesen spezifischen Raum
                 client.subscribe("wasserwaage/" + sessionId);
             },
             useSSL: true
         });
 
-        // Klick auf den PC-Button leitet das Speichern ein
+        // Klick auf den PC-Button speichert den aktuellen Wert
         document.getElementById('pc-calibrate-btn').addEventListener('click', () => {
-            calibrating = true; // Signalisiert dem Script, den nächsten Gyro-Wert als Basis zu nehmen
+            calibrating = true;
             
-            // Sendet Vibrationsbefehl an das Handy
-            const message = new Paho.MQTT.Message(JSON.stringify({ type: 'trigger-vibrate' }));
-            message.destinationName = "wasserwaage/" + sessionId;
-            client.send(message);
+            // Vibrations-Befehl ans Handy schicken
+            try {
+                const message = new Paho.MQTT.Message(JSON.stringify({ type: 'trigger-vibrate' }));
+                message.destinationName = "wasserwaage/" + sessionId;
+                client.send(message);
+            } catch(e) {}
         });
 
         function handleLiveCalculation(currentBeta, currentGamma) {
+            // Berechnung basierend auf der Display-nach-unten Lage des Handys auf dem Tisch
             const diffBeta = currentBeta + tableBeta; 
             const diffGamma = currentGamma - tableGamma; 
             const totalDeviation = Math.sqrt(diffBeta * diffBeta + diffGamma * diffGamma);
