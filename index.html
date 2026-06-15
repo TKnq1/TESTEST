@@ -46,15 +46,14 @@
         </div>
     </div>
 
-    <script>
-        // 1. ZUERST DEN QR-CODE GENERIEREN (Damit er sofort da ist!)
+ <script>
+        // 1. ZUERST DEN QR-CODE GENERIEREN
         const sessionId = 'room_' + Math.random().toString(36).substr(2, 9);
         const sensorUrl = `https://tknq1.github.io/TESTEST/sensor.html?room=${sessionId}`;
         
-        // QR-Code Bildquelle setzen
         document.getElementById('qr-img').src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(sensorUrl)}`;
 
-        // 2. ERST DANACH DIE NETZWERK-VERBINDUNG STARTEN
+        // 2. NETZWERK-VERBINDUNG STARTEN (Korrekt mit Port 8001 für SSL!)
         let client;
         let tableBeta = 0;
         let tableGamma = 0;
@@ -65,7 +64,11 @@
         let dataReceivedOnce = false;
 
         try {
-            client = new Paho.MQTT.Client("broker.hivemq.com", Number(8000), "pc_" + sessionId);
+            // Geändert auf den zuverlässigeren Eclipse-Broker und Port 8001 für echtes SSL
+            client = new Paho.MQTT.Client("iot.eclipse.org", Number(443), "pc_" + sessionId);
+
+            // BACKUP: Falls Eclipse hakt, nutzen wir HiveMQ mit sicherem Port 8001
+            // client = new Paho.MQTT.Client("broker.hivemq.com", Number(8001), "pc_" + sessionId);
 
             client.onMessageArrived = (message) => {
                 const data = JSON.parse(message.payloadString);
@@ -89,9 +92,10 @@
             client.connect({
                 onSuccess: () => { 
                     client.subscribe("wasserwaage/" + sessionId); 
-                    console.log("Erfolgreich verbunden.");
+                    console.log("PC erfolgreich verschlüsselt verbunden.");
                 },
-                useSSL: true
+                useSSL: true,
+                timeout: 3
             });
         } catch(e) {
             console.error("MQTT Verbindungsfehler:", e);
