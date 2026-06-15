@@ -46,14 +46,13 @@
         </div>
     </div>
 
- <script>
-        // 1. ZUERST DEN QR-CODE GENERIEREN
+    <script>
+        // 1. QR-CODE GENERIEREN
         const sessionId = 'room_' + Math.random().toString(36).substr(2, 9);
         const sensorUrl = `https://tknq1.github.io/TESTEST/sensor.html?room=${sessionId}`;
-        
         document.getElementById('qr-img').src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(sensorUrl)}`;
 
-        // 2. NETZWERK-VERBINDUNG STARTEN (Korrekt mit Port 8001 für SSL!)
+        // 2. VARIABLEN INITIALISIEREN
         let client;
         let tableBeta = 0;
         let tableGamma = 0;
@@ -63,12 +62,9 @@
         let currentLiveGamma = 0;
         let dataReceivedOnce = false;
 
+        // 3. SERVER-VERBINDUNG ÜBER SICHERS WSS (PORT 8081)
         try {
-            // Geändert auf den zuverlässigeren Eclipse-Broker und Port 8001 für echtes SSL
-            client = new Paho.MQTT.Client("iot.eclipse.org", Number(443), "pc_" + sessionId);
-
-            // BACKUP: Falls Eclipse hakt, nutzen wir HiveMQ mit sicherem Port 8001
-            // client = new Paho.MQTT.Client("broker.hivemq.com", Number(8001), "pc_" + sessionId);
+            client = new Paho.MQTT.Client("test.mosquitto.org", Number(8081), "pc_" + sessionId);
 
             client.onMessageArrived = (message) => {
                 const data = JSON.parse(message.payloadString);
@@ -77,6 +73,7 @@
                     currentLiveBeta = data.beta;
                     currentLiveGamma = data.gamma;
 
+                    // Sobald das Smartphone echte Daten sendet, wird die Anzeige grün
                     if (!dataReceivedOnce) {
                         dataReceivedOnce = true;
                         document.getElementById('connection-status').textContent = '⚡ LIVE-VERBINDUNG AKTIV ✔';
@@ -92,32 +89,48 @@
             client.connect({
                 onSuccess: () => { 
                     client.subscribe("wasserwaage/" + sessionId); 
-                    console.log("PC erfolgreich verschlüsselt verbunden.");
+                    console.log("PC erfolgreich verschlüsselt mit Mosquitto verbunden.");
                 },
                 useSSL: true,
-                timeout: 3
+                timeout: 5
             });
         } catch(e) {
             console.error("MQTT Verbindungsfehler:", e);
         }
 
-        // Button: Wasserwaage öffnen
-        document.getElementById('pc-start-level-btn').addEventListener('click', () => {
+        // 4. TASTATUR-BACKUP (Falls das Smartphone blockiert)
+        window.addEventListener('keydown', (e) => {
+            // Reagiert nur, wenn noch keine echten Handydaten da sind
             if (!dataReceivedOnce) {
-                alert("⚠️ Hinweis: Der PC empfängt noch keine Sensordaten.\n\nStelle sicher, dass du auf dem Handy auf den roten Bildschirm getippt hast.");
-            }
+                if (e.key === 'ArrowUp')    currentLiveBeta += 2;
+                if (e.key === 'ArrowDown')  currentLiveBeta -= 2;
+                if (e.key === 'ArrowLeft')  currentLiveGamma -= 2;
+                if (e.key === 'ArrowRight') currentLiveGamma += 2;
 
+                document.getElementById('connection-status').textContent = '🎮 TASTATUR-STEUERUNG AKTIV';
+                document.getElementById('connection-status').style.color = '#38bdf8'; // Blaues Info-Licht
+
+                if (isCalibrated) {
+                    handleLiveCalculation(currentLiveBeta, currentLiveGamma);
+                }
+            }
+        });
+
+        // 5. BUTTON-LOGIK: WECHSEL ZU SCHRITT 2
+        document.getElementById('pc-start-level-btn').addEventListener('click', () => {
+            // QR-Code ausblenden und Grid zentrieren
             document.getElementById('qr-section').style.display = 'none';
             const mainContainer = document.getElementById('main-container');
             mainContainer.style.display = 'block';
             mainContainer.style.maxWidth = '600px';
             mainContainer.style.margin = '0 auto';
 
+            // Ansichten umschalten
             document.getElementById('pc-step-1').classList.remove('active');
             document.getElementById('pc-step-2').classList.add('active');
         });
 
-        // Button: Kalibrieren
+        // 6. BUTTON-LOGIK: TISCH SPEICHERN (KALIBRIEREN)
         document.getElementById('pc-calibrate-btn').addEventListener('click', () => {
             tableBeta = currentLiveBeta;
             tableGamma = currentLiveGamma;
@@ -127,21 +140,27 @@
             document.getElementById('pc-calibrate-btn').textContent = '🔄 Neu kalibrieren (Wert aktualisiert)';
             document.getElementById('pc-calibrate-btn').style.background = 'rgba(129, 140, 248, 0.2)';
 
+            // Falls das Handy verbunden ist, schicke Vibrations-Signal
             try {
                 const message = new Paho.MQTT.Message(JSON.stringify({ type: 'trigger-vibrate' }));
                 message.destinationName = "wasserwaage/" + sessionId;
                 client.send(message);
             } catch(e) {}
+            
+            // Sofortige Erstberechnung nach Klick ausführen
+            handleLiveCalculation(currentLiveBeta, currentLiveGamma);
         });
 
-        // Mathematische Auswertung
+        // 7. MATHEMATISCHE AUSWERTUNG (ABWEICHUNG)
         function handleLiveCalculation(currentBeta, currentGamma) {
             let diffBeta = Math.abs(currentBeta - tableBeta);
             let diffGamma = Math.abs(currentGamma - tableGamma);
 
+            // 180-Grad-Kipp-Korrektur (Tisch vs. Monitor)
             if (diffBeta > 90) diffBeta = Math.abs(diffBeta - 180);
             if (diffGamma > 90) diffGamma = Math.abs(diffGamma - 180);
 
+            // Euklidischer Abstand für die Gesamtabweichung im Raum
             const totalDeviation = Math.sqrt(diffBeta * diffBeta + diffGamma * diffGamma);
 
             const liveBox = document.getElementById('live-box');
@@ -150,6 +169,7 @@
 
             degreeVal.textContent = totalDeviation.toFixed(1);
 
+            // Toleranzbereich für ein "perfektes" Ergebnis
             if (totalDeviation < 1.8) {
                 liveBox.className = "live-display status-success";
                 statusMsg.textContent = "✓ Perfekt parallel!";
