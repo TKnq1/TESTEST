@@ -42,16 +42,19 @@
                 <img id="qr-img" src="" alt="Generiere QR Code...">
             </div>
             <h2>Verbinde dein Sensor-Tool</h2>
-            <p id="connection-status" style="color: var(--accent); font-weight: bold;">Status: Bereit zum Scannen</p>
+            <p id="connection-status" style="color: #ef4444; font-weight: bold; font-size: 1.1rem; margin-top: 1rem;">Status: Bereit zum Scannen</p>
         </div>
     </div>
 
     <script>
+        // Erzeuge eine einzigartige Raum-ID für diese Sitzung
         const sessionId = 'room_' + Math.random().toString(36).substr(2, 9);
         
+        // QR-Code Link zu deinem GitHub-Pages-Repository generieren
         const sensorUrl = `https://tknq1.github.io/TESTEST/sensor.html?room=${sessionId}`;
         document.getElementById('qr-img').src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(sensorUrl)}`;
 
+        // Verbindung zum öffentlichen HiveMQ-Broker herstellen
         const client = new Paho.MQTT.Client("broker.hivemq.com", Number(8000), "pc_" + sessionId);
 
         let tableBeta = 0;
@@ -60,7 +63,9 @@
         
         let currentLiveBeta = 0;
         let currentLiveGamma = 0;
+        let dataReceivedOnce = false;
 
+        // Wenn Nachrichten über den MQTT-Server ankommen
         client.onMessageArrived = (message) => {
             const data = JSON.parse(message.payloadString);
             
@@ -68,9 +73,14 @@
                 currentLiveBeta = data.beta;
                 currentLiveGamma = data.gamma;
 
-                document.getElementById('connection-status').textContent = 'Status: Live-Daten empfangen ✔';
-                document.getElementById('connection-status').style.color = 'var(--success)';
+                // Sobald das allererste Signal vom Handy registriert wird
+                if (!dataReceivedOnce) {
+                    dataReceivedOnce = true;
+                    document.getElementById('connection-status').textContent = '⚡ LIVE-VERBINDUNG AKTIV ✔';
+                    document.getElementById('connection-status').style.color = '#22c55e'; // Grün färben
+                }
 
+                // Berechne die Abweichung, wenn der Tisch bereits gespeichert wurde
                 if (isCalibrated) {
                     handleLiveCalculation(currentLiveBeta, currentLiveGamma);
                 }
@@ -78,64 +88,57 @@
         };
 
         client.connect({
-            onSuccess: () => { client.subscribe("wasserwaage/" + sessionId); },
+            onSuccess: () => { 
+                client.subscribe("wasserwaage/" + sessionId); 
+                console.log("PC-Client erfolgreich mit dem Broker verbunden.");
+            },
             useSSL: true
         });
 
+        // Event-Listener für den "Wasserwaage öffnen" Button
         document.getElementById('pc-start-level-btn').addEventListener('click', () => {
+            if (!dataReceivedOnce) {
+                alert("⚠️ Hinweis: Der PC empfängt noch keine Sensordaten.\n\nStelle sicher, dass du auf dem Handy auf den roten Bildschirm getippt hast und (bei iPhones) den Zugriff erlaubt hast.");
+            }
+
+            // QR-Code ausblenden und Layout anpassen
             document.getElementById('qr-section').style.display = 'none';
-            document.getElementById('main-container').style.display = 'block';
-            document.getElementById('main-container').style.maxWidth = '600px';
+            const mainContainer = document.getElementById('main-container');
+            mainContainer.style.display = 'block';
+            mainContainer.style.maxWidth = '600px';
+            mainContainer.style.margin = '0 auto';
+
+            // Schritte umschalten
             document.getElementById('pc-step-1').classList.remove('active');
             document.getElementById('pc-step-2').classList.add('active');
         });
 
-        // KORRIGIERTER KALIBRIERUNGS-BUTTON (Erlaubt unendlich viele Klicks)
+        // Event-Listener für den Kalibrierungs-Button
         document.getElementById('pc-calibrate-btn').addEventListener('click', () => {
-            // Werte eintragen
+            // Speichere die aktuellen Werte als Null-Linie
             tableBeta = currentLiveBeta;
             tableGamma = currentLiveGamma;
             isCalibrated = true;
             
+            // UI aktualisieren
             document.getElementById('instruction-step-3').style.display = 'block';
             document.getElementById('pc-calibrate-btn').textContent = '🔄 Neu kalibrieren (Wert aktualisiert)';
             document.getElementById('pc-calibrate-btn').style.background = 'rgba(129, 140, 248, 0.2)';
 
-            // Signal ans Handy senden (Vibration)
+            // Vibrationsbefehl an das Smartphone senden
             try {
                 const message = new Paho.MQTT.Message(JSON.stringify({ type: 'trigger-vibrate' }));
                 message.destinationName = "wasserwaage/" + sessionId;
                 client.send(message);
-            } catch(e) {}
+            } catch(e) {
+                console.error("Fehler beim Senden des Vibrations-Befehls:", e);
+            }
         });
 
-        // NEUE MATHEMATISCHE BERECHNUNG
+        // Mathematische Auswertung der Abweichung
         function handleLiveCalculation(currentBeta, currentGamma) {
-            // Math.abs() verhindert Vorzeichen-Fehler (berechnet den absoluten Abstand zur Null-Linie)
+            // Absoluten Abstand zur gespeicherten Null-Linie berechnen
             let diffBeta = Math.abs(currentBeta - tableBeta);
             let diffGamma = Math.abs(currentGamma - tableGamma);
 
-            // Falls das Handy komplett umgedreht wurde (Tisch vs. Monitor), korrigieren wir den 180-Grad-Sturz
-            if (diffBeta > 90) diffBeta = Math.abs(diffBeta - 180);
-            if (diffGamma > 90) diffGamma = Math.abs(diffGamma - 180);
-
-            // Euklidischer Abstand für die Gesamtabweichung im Raum
-            const totalDeviation = Math.sqrt(diffBeta * diffBeta + diffGamma * diffGamma);
-
-            const liveBox = document.getElementById('live-box');
-            const statusMsg = document.getElementById('status-msg');
-            const degreeVal = document.getElementById('degree-val');
-
-            degreeVal.textContent = totalDeviation.toFixed(1);
-
-            if (totalDeviation < 2.0) { // Toleranz leicht erhöht auf 2.0 Grad für stabileres Justieren
-                liveBox.className = "live-display status-success";
-                statusMsg.textContent = "✓ Perfekt parallel!";
-            } else {
-                liveBox.className = "live-display status-error";
-                statusMsg.textContent = "⚠️ Nicht parallel";
-            }
-        }
-    </script>
-</body>
-</html>
+            // Korrektur für den Fall, dass das Handy im Raum komplett gekippt wird (Tisch vs. Monitor)
