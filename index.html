@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Interaktive Wasserwaage | Monitor-Ausrichtung</title>
     <link rel="stylesheet" href="style.css">
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js" type="text/javascript"></script>
 </head>
 <body>
 
@@ -15,14 +15,14 @@
             
             <div id="pc-step-1" class="step active">
                 <p>1. Scanne den QR-Code mit deinem Smartphone.</p>
-                <p>2. Lege das Handy <strong>flach mit dem Display nach unten</strong> auf den Tisch.</p>
+                <p style="margin-bottom: 1.5rem;">2. Lege das Handy <strong>flach mit dem Display nach unten</strong> auf den Tisch.</p>
                 <button class="btn" id="pc-calibrate-btn" disabled>Warte auf Smartphone-Verbindung...</button>
             </div>
 
             <div id="pc-step-2" class="step">
-                <p>3. Nimm das Handy jetzt hoch und halte es <strong>flach an deinen Monitor</strong>.</p>
+                <p style="margin-bottom: 1.5rem;">3. Nimm das Handy jetzt hoch und halte es <strong>flach an deinen Monitor</strong>.</p>
                 
-                <div id="live-box" class="live-display status-error" style="margin-top: 1.5rem;">
+                <div id="live-box" class="live-display status-error">
                     <div id="status-msg" class="status-text">⚠️ Nicht parallel</div>
                     <div class="deviation-val"><span id="degree-val">0.0</span>°</div>
                 </div>
@@ -39,54 +39,69 @@
     </div>
 
     <script>
-        // Generiere eine zufällige Session-ID, damit sich Handys nicht gegenseitig stören
+        // Generiere eine einzigartige Session-ID
         const sessionId = 'room_' + Math.random().toString(36).substr(2, 9);
         
-        // QR-Code dynamisch generieren (Ersetze 'tknq1' mit deinem Repository falls nötig)
+        // Dynamischer QR-Code Link zu deinem Repository
         const sensorUrl = `https://tknq1.github.io/TESTEST/sensor.html?room=${sessionId}`;
         document.getElementById('qr-img').src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(sensorUrl)}`;
 
-        // Verbindung zu einer anonymen, freien Test-Datenbank (Supabase Realtime)
-        // Hinweis: Für ein finales eigenes Projekt nutzt man hier eigene Keys.
-        const supabaseUrl = 'https://xyz.supabase.co'; // Dummy, wir nutzen den Broadcast Channel direkt im Browser via Supabase Client
-        const supabaseKey = 'public-anon-key';
-        const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
-
-        const channel = supabaseClient.channel(sessionId);
+        // Verbindung zum öffentlichen, kostenlosen HiveMQ Web-Broker
+        const client = new Paho.MQTT.Client("broker.hivemq.com", Number(8000), "pc_" + sessionId);
 
         let tableBeta = 0;
         let tableGamma = 0;
+        let calibrating = false;
 
-        // Auf Signale vom Handy lauschen
-        channel
-            .on('broadcast', { event: 'phone-connected' }, () => {
+        client.onConnectionLost = (responseObject) => { if (responseObject.errorCode !== 0) console.log("Verbindung verloren:"+responseObject.errorMessage); };
+        
+        // Wenn Nachrichten vom Handy ankommen
+        client.onMessageArrived = (message) => {
+            const data = JSON.parse(message.payloadString);
+            
+            if (data.type === 'phone-connected') {
                 document.getElementById('connection-status').textContent = 'Status: Verbunden ✔';
                 document.getElementById('connection-status').style.color = 'var(--success)';
                 document.getElementById('pc-calibrate-btn').disabled = false;
                 document.getElementById('pc-calibrate-btn').textContent = 'Tisch-Neigung jetzt speichern';
-            })
-            .on('broadcast', { event: 'gyro-data' }, ({ payload }) => {
-                handleLiveCalculation(payload.beta, payload.gamma);
-            })
-            .subscribe();
-
-        // PC-Button klickt: Signal ans Handy senden, dass es die aktuellen Werte loggen soll
-        document.getElementById('pc-calibrate-btn').addEventListener('click', () => {
-            channel.send({
-                type: 'broadcast',
-                event: 'trigger-calibration',
-                payload: {}
-            });
+            }
             
-            // Wechsel zu Schritt 2 auf dem PC-Bildschirm
-            document.getElementById('pc-step-1').classList.remove('active');
-            document.getElementById('pc-step-2').classList.add('active');
+            if (data.type === 'gyro-data') {
+                if (calibrating) {
+                    // Speichert den aktuellen Wert des Handys als Tisch-Referenz
+                    tableBeta = data.beta;
+                    tableGamma = data.gamma;
+                    calibrating = false;
+                    
+                    // Schaltet auf die Live-Ansicht um
+                    document.getElementById('pc-step-1').classList.remove('active');
+                    document.getElementById('pc-step-2').classList.add('active');
+                } else if (tableBeta !== 0) {
+                    // Führe die Berechnung aus, sobald der Tisch einmal eingemessen wurde
+                    handleLiveCalculation(data.beta, data.gamma);
+                }
+            }
+        };
+
+        client.connect({
+            onSuccess: () => {
+                // Abonniere das Thema für diesen spezifischen Raum
+                client.subscribe("wasserwaage/" + sessionId);
+            },
+            useSSL: true
+        });
+
+        // Klick auf den PC-Button leitet das Speichern ein
+        document.getElementById('pc-calibrate-btn').addEventListener('click', () => {
+            calibrating = true; // Signalisiert dem Script, den nächsten Gyro-Wert als Basis zu nehmen
+            
+            // Sendet Vibrationsbefehl an das Handy
+            const message = new Paho.MQTT.Message(JSON.stringify({ type: 'trigger-vibrate' }));
+            message.destinationName = "wasserwaage/" + sessionId;
+            client.send(message);
         });
 
         function handleLiveCalculation(currentBeta, currentGamma) {
-            // Wenn tableBeta noch 0 ist, warten wir auf den ersten kalibrierten Wert vom Handy
-            if(tableBeta === 0 && tableGamma === 0) return;
-
             const diffBeta = currentBeta + tableBeta; 
             const diffGamma = currentGamma - tableGamma; 
             const totalDeviation = Math.sqrt(diffBeta * diffBeta + diffGamma * diffGamma);
