@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Handy-Neigungsmesser</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+            text-align: center;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 30px;
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            max-width: 400px;
+            width: 100%;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+        h1 { font-size: 1.8rem; margin-bottom: 20px; }
+        p { font-size: 1rem; color: #e0e0e0; margin-bottom: 30px; line-height: 1.5; }
+        
+        /* Live-Anzeige der Werte */
+        .werte-box {
+            background: rgba(0,0,0,0.3);
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 25px;
+            font-family: monospace;
+            font-size: 1.1rem;
+        }
+        
+        button {
+            background: #27ae60;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 1.1rem;
+            border-radius: 50px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.2s, transform 0.1s;
+            width: 100%;
+        }
+        button:hover { background: #2ecc71; transform: scale(1.02); }
+        button:active { transform: scale(0.98); }
+        
+        .vergleich {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255,255,255,0.2);
+            display: none; /* Wird erst bei Schritt 3 sichtbar */
+        }
+        .ergebnis {
+            font-size: 1.3rem;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1 id="schritt-titel">Schritt 1: Tisch messen</h1>
+        <p id="anweisung">Lege das Handy flach auf den Tisch, sodass der Bildschirm nach UNTEN zeigt.</p>
+
+        <div class="werte-box">
+            Neigung X: <span id="valX">0.0</span>°<br>
+            Neigung Y: <span id="valY">0.0</span>°
+        </div>
+
+        <button id="action-btn" onclick="nextStep()">Berechtigung erteilen</button>
+
+        <div id="vergleichs-bereich" class="vergleich">
+            <h3>Tisch-Wert (Gespeichert):</h3>
+            <p id="tisch-wert">X: 0°, Y: 0°</p>
+            <h3>Differenz zum Monitor:</h3>
+            <div id="differenz-ergebnis" class="ergebnis">Berechne...</div>
+        </div>
+    </div>
+
+    <script>
+        let aktuellerSchritt = 0; // 0 = Berechtigung, 1 = Tisch, 2 = Monitor
+        let currentX = 0, currentY = 0;
+        let tischX = 0, tischY = 0;
+
+        // Funktion, um die Sensoren auszulesen
+        function starteSensor() {
+            window.addEventListener('deviceorientation', (event) => {
+                // beta (X) und gamma (Y) liefern die Neigungswinkel in Grad
+                currentX = event.beta ? event.beta.toFixed(1) : 0;
+                currentY = event.gamma ? event.gamma.toFixed(1) : 0;
+
+                // Live-Werte auf dem Bildschirm aktualisieren
+                document.getElementById('valX').innerText = currentX;
+                document.getElementById('valY').innerText = currentY;
+
+                // Wenn wir in Schritt 2 (Monitor-Abgleich) sind, berechne die Differenz
+                if (aktuellerSchritt === 2) {
+                    let diffX = (currentX - tischX).toFixed(1);
+                    let diffY = (currentY - tischY).toFixed(1);
+                    
+                    let ergebnisText = `Abweichung: X: ${diffX}° | Y: ${diffY}°`;
+                    
+                    // Wenn die Abweichung fast 0 ist, ist es perfekt justiert!
+                    if (Math.abs(diffX) < 1 && Math.abs(diffY) < 1) {
+                        document.getElementById('differenz-ergebnis').innerHTML = `<span style="color: #2ecc71;">✓ Perfekt justiert!</span><br>${ergebnisText}`;
+                    } else {
+                        document.getElementById('differenz-ergebnis').innerHTML = `<span style="color: #e74c3c;">⚠️ Nicht parallel</span><br>${ergebnisText}`;
+                    }
+                }
+            });
+        }
+
+        // Die Logik für die Schritte
+        function nextStep() {
+            // SCHRITT 0: iOS verlangt seit einigen Jahren eine explizite Erlaubnis für Sensoren
+            if (aktuellerSchritt === 0) {
+                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    DeviceOrientationEvent.requestPermission()
+                        .then(response => {
+                            if (response == 'granted') {
+                                starteSensor();
+                                geheZuSchritt1();
+                            } else {
+                                alert("Sensor-Berechtigung wurde abgelehnt.");
+                            }
+                        })
+                        .catch(console.error);
+                } else {
+                    // Android und ältere Geräte brauchen keine Erlaubnis
+                    starteSensor();
+                    geheZuSchritt1();
+                }
+                return;
+            }
+
+            // SCHRITT 1: Tisch-Neigung speichern
+            if (aktuellerSchritt === 1) {
+                tischX = currentX;
+                tischY = currentY;
+                
+                // Text anpassen für Schritt 2
+                document.getElementById('schritt-titel').innerText = "Schritt 2: Monitor abgleichen";
+                document.getElementById('anweisung').innerText = "Lege das Handy nun flach an deinen Monitor (oder halte es parallel dazu), um die Neigung zu vergleichen und zu adjustieren.";
+                document.getElementById('tisch-wert').innerText = `X: ${tischX}°, Y: ${tischY}°`;
+                document.getElementById('vergleichs-bereich').style.display = "block";
+                document.getElementById('action-btn').style.display = "none"; // Button ausblenden, da ab jetzt live verglichen wird
+                
+                aktuellerSchritt = 2;
+            }
+        }
+
+        function geheZuSchritt1() {
+            aktuellerSchritt = 1;
+            document.getElementById('action-btn').innerText = "Tisch-Neigung speichern";
+        }
+    </script>
+</body>
+</html>

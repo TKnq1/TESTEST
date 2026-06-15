@@ -1,0 +1,154 @@
+/* 1. Globale Einstellungen (Reset) - Unverändert */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+/* 2. Hintergrund und Zentrierung - Unverändert, 
+   aber wir brauchen relative Positionierung für den Trick */
+/* 1. Globale Einstellungen */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+/* 2. Der Body dient jetzt nur noch als Container */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    position: relative;
+    overflow: hidden; /* Verhindert, dass das hineinzooomende Bild Ränder erzeugt */
+}
+
+/* 3. HIER REINSTELLEN: Dein eigentlicher Hintergrund */
+body::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    
+    /* 🔴 DEIN HINTERGRUNDBILD (oder nutze hier deinen Farbverlauf) */
+    background-image: url('/images/ios-13-grey-dark-5k-r6.jpg');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    
+    /* Der Startzustand: Keine Unschärfe, normale Größe (Skalierung 1) */
+    filter: blur(0px);
+    transform: scale(1);
+    
+    /* Sorgt dafür, dass Zoom und Blur absolut flüssig aussehen */
+    transition: transform 0.5s ease-out, filter 0.5s ease-out;
+    z-index: 1;
+}
+
+/* 4. WENN DIE QR-BOX GEHOVERT WIRD: Hintergrund zoomen und bluren */
+body:has(.qr-card:hover)::before {
+    filter: blur(8px);       /* Wird unscharf */
+    transform: scale(1.08);   /* Zoomt um 8% heran */
+}
+
+/* 5. Äußerer Container (Muss über dem Hintergrund liegen!) */
+.seiten-inhalt {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 50px;
+    max-width: 900px;
+    width: 100%;
+    
+    /* Innenabstand, damit Text und QR-Card Platz zum Rand haben */
+    padding: 40px; 
+    
+    position: relative;
+    z-index: 2;
+
+    /* --- HIER SIND DIE NEUEN EINSTELLUNGEN FÜR DIE TRANSPARENTE BOX --- */
+    
+    /* Schwarzer Hintergrund mit nur 15% Deckkraft (0.15) */
+    background-color: rgba(139, 139, 139, 0.15); 
+    
+    /* Abgerundete Ecken für die große Box */
+    border-radius: 24px; 
+    
+    /* Ein feiner, eleganter Rahmen (optional) */
+    border: 1px solid rgba(255, 255, 255, 0.253); 
+    
+    /* Ein leichter Schatten nach außen */
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+}
+
+/* 5. Styling für die linke Hauptüberschrift - Unverändert */
+.haupt-titel {
+    font-size: 2.8rem;
+    color: #ffffff; /* Geändert von #1a1a1a auf Weiß */
+    text-align: left;
+    flex: 1;
+    line-height: 1.2;
+}
+
+/* 6. Die QR-Code-Box - TRANSITION ERGÄNZT */
+.qr-card {
+    background-color: #ffffff;
+    padding: 25px;
+    border-radius: 16px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    text-align: center;
+    width: 280px;
+    flex-shrink: 0;
+    
+    /* FÜR DEN SANFTEN HOVER-EFFEKT (Aus dem letzten Schritt) */
+    transition: transform 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
+}
+
+/* 7. HOVER-EFFEKT FÜR DIE BOX */
+.qr-card:hover {
+    transform: scale(1.05); /* Leicht vergrößern */
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2); /* Schatten verstärken */
+}
+
+/* 8. WENN DIE BOX GEHOVERT WIRD, AKTIVIERE DAS BLUR-OVERLAY */
+/* Der Selektor :has() ist modern und perfekt dafür */
+body:has(.qr-card:hover)::before {
+    opacity: 1;                   /* Macht das Overlay sichtbar */
+    backdrop-filter: blur(8px);  /* WENDE DIE UNSCHÄRFE AN */
+}
+
+/* --- Unveränderte QR-Karten-Details --- */
+.qr-code {
+    width: 100%;
+    height: auto;
+    border-radius: 8px;
+    margin-bottom: 20px;
+}
+.qr-card h2 {
+    font-size: 1.4rem;
+    color: #333333;
+    margin-bottom: 10px;
+}
+.qr-card p {
+    font-size: 0.95rem;
+    color: #666666;
+    line-height: 1.4;
+}
+
+/* --- Unverändertes Responsive Design --- */
+@media (max-width: 768px) {
+    .seiten-inhalt {
+        flex-direction: column;
+        text-align: center;
+        gap: 30px;
+    }
+    .haupt-titel {
+        text-align: center;
+        font-size: 2rem;
+    }
+}
